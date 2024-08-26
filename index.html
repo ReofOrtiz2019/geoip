@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geo localización IP Pública</title>
+    <!-- Incluir Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #map {
+            height: 400px;
+            width: 100%;
+            margin-top: 20px;
+        }
+        #coords {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center">Geo localización IP Pública</h1>
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="mb-3">
+                    <label for="contractAddress" class="form-label">Contract Address</label>
+                    <input type="text" class="form-control" id="contractAddress" value="0x7461e672dA08048b298f30A182168d9ab40E5858" readonly>
+                </div>
+                <div class="mb-3">
+                    <label for="subscriptionId" class="form-label">Subscription ID</label>
+                    <input type="text" class="form-control" id="subscriptionId" value="3398" readonly>
+                </div>
+                <div class="mb-3">
+                    <label for="ipAddress" class="form-label">IP Address</label>
+                    <input type="text" class="form-control" id="ipAddress" placeholder="Obteniendo IP pública..." readonly>
+                </div>
+                <button id="submitBtn" class="btn btn-primary w-100" disabled>Obtener Ubicación</button>
+                <div id="loading" class="text-center mt-3" style="display: none;">
+                    <p>Esperando respuesta...</p>
+                    <div class="progress">
+                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                </div>
+                <div id="map"></div>
+                <div id="coords" class="text-center"></div> <!-- Div para mostrar latitud y longitud -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Incluir Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://cdn.ethers.io/lib/ethers-5.2.umd.min.js"></script>
+    <script>
+        const abi = [
+            {
+                "inputs": [],
+                "stateMutability": "nonpayable",
+                "type": "constructor"
+            },
+            {
+                "inputs": [
+                    {
+                        "internalType": "uint64",
+                        "name": "subscriptionId",
+                        "type": "uint64"
+                    },
+                    {
+                        "internalType": "string[]",
+                        "name": "args",
+                        "type": "string[]"
+                    }
+                ],
+                "name": "enviarSolicitud",
+                "outputs": [
+                    {
+                        "internalType": "bytes32",
+                        "name": "requestId",
+                        "type": "bytes32"
+                    }
+                ],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "ipAdress",
+                "outputs": [
+                    {
+                        "internalType": "string",
+                        "name": "",
+                        "type": "string"
+                    }
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
+
+        let map; // Variable global para almacenar la referencia al mapa
+
+        function initMap(latitude = 0, longitude = 0) {
+            if (map) {
+                // Si el mapa ya está inicializado, simplemente actualiza la vista y los marcadores
+                map.setView([latitude, longitude], 13);
+
+                // Eliminar marcadores anteriores
+                map.eachLayer(function (layer) {
+                    if (layer instanceof L.Marker) {
+                        map.removeLayer(layer);
+                    }
+                });
+
+                // Añadir un nuevo marcador si las coordenadas no son las predeterminadas
+                if (latitude !== 0 && longitude !== 0) {
+                    L.marker([latitude, longitude]).addTo(map)
+                        .bindPopup('Ubicación obtenida.')
+                        .openPopup();
+                }
+            } else {
+                // Si el mapa no está inicializado, crea uno nuevo
+                map = L.map('map').setView([latitude, longitude], 2);
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                }).addTo(map);
+
+                // Añadir un marcador si las coordenadas no son las predeterminadas
+                if (latitude !== 0 && longitude !== 0) {
+                    L.marker([latitude, longitude]).addTo(map)
+                        .bindPopup('Ubicación obtenida.')
+                        .openPopup();
+                }
+            }
+        }
+
+        async function fetchPublicIP() {
+            try {
+                const response = await fetch('https://api.ipify.org?format=json');
+                const data = await response.json();
+                document.getElementById('ipAddress').value = data.ip;
+                document.getElementById('ipAddress').removeAttribute('readonly');
+                document.getElementById('submitBtn').removeAttribute('disabled');
+            } catch (error) {
+                console.error('Error al obtener la IP pública:', error);
+                document.getElementById('ipAddress').value = 'Error obteniendo IP';
+            }
+        }
+
+        async function connectWallet() {
+            if (window.ethereum) {
+                try {
+                    // Solicitar acceso a la billetera
+                    await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    console.log('Conexión a la billetera exitosa');
+                    // Ahora habilitar el botón de obtener ubicación
+                    document.getElementById('submitBtn').disabled = false;
+                } catch (error) {
+                    console.error('Usuario rechazó la conexión a la billetera:', error);
+                }
+            } else {
+                console.error('MetaMask no está instalado.');
+            }
+        }
+
+        async function getCoordinates() {
+			initMap();
+            const contractAddress = document.getElementById('contractAddress').value;
+            const subscriptionId = document.getElementById('subscriptionId').value;
+            const ipAddress = document.getElementById('ipAddress').value;
+
+            if (!ipAddress || ipAddress === 'Error obteniendo IP') {
+                alert('Error al obtener la IP pública.');
+                return;
+            }
+
+            const provider = new ethers.providers.Web3Provider(window.ethereum);
+            const signer = provider.getSigner();
+            const contract = new ethers.Contract(contractAddress, abi, signer);
+
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('progressBar').style.width = '0%'; // Reinicia la barra de progreso
+
+            const args = [ipAddress];
+
+            try {
+                const tx = await contract.enviarSolicitud(subscriptionId, args);
+                console.log('Transacción enviada, esperando confirmación...');
+
+                // Espera la confirmación de la transacción
+                const receipt = await tx.wait();
+                console.log('Transacción confirmada:', receipt);
+
+                let progress = 0;
+                const interval = setInterval(async () => {
+                    progress += 10;
+                    document.getElementById('progressBar').style.width = progress + '%';
+                    document.getElementById('progressBar').setAttribute('aria-valuenow', progress);
+
+                    const response = await contract.ipAdress();
+					console.log('Respuesta obtenida:'+response);
+
+                    if (response && /^[^,]+,[^,]+$/.test(response.trim())) {
+                        document.getElementById('loading').style.display = 'none';
+                        clearInterval(interval);
+
+                        const [latitude, longitude] = response.split(',');
+                        console.log('latitud:' + latitude);
+                        console.log('longitud:' + longitude);
+
+                        // Mostrar latitud y longitud en pantalla
+                        document.getElementById('coords').innerHTML = `Latitud: ${latitude}, Longitud: ${longitude}`;
+
+                        // Actualizar el mapa con las coordenadas obtenidas
+                        initMap(parseFloat(latitude), parseFloat(longitude));
+                    }
+
+                    if (progress >= 100) {
+                        progress = 0; // Reinicia la barra si alcanza el 100%
+                    }
+                }, 10000); // Verificar cada 10 segundos
+            } catch (error) {
+                console.error('Error al obtener las coordenadas:', error);
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        document.getElementById('submitBtn').addEventListener('click', getCoordinates);
+
+        // Inicializar el mapa al cargar la página
+        document.addEventListener('DOMContentLoaded', function () {
+            initMap(); // Inicializa el mapa en las coordenadas [0, 0] con un zoom de 2
+        });
+
+        // Conectar la billetera al cargar la página
+        connectWallet();
+
+        // Fetch the public IP on page load
+        fetchPublicIP();
+    </script>
+</body>
+</html>
